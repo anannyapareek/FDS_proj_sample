@@ -1,0 +1,8 @@
+datasets
+pandas
+scikit-learn
+xgboost
+google-generativeai
+groq
+python-dotenv
+joblib
