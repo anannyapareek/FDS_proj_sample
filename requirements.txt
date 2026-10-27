@@ -2,7 +2,7 @@ datasets
 pandas
 scikit-learn
 xgboost
-google-generativeai
+google-genai
 groq
 python-dotenv
 joblib
