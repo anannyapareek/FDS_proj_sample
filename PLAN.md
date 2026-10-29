@@ -50,7 +50,7 @@ Labels are defined by what the response does, not by which dataset it came from.
 | Dataset | Used for |
 |---|---|
 | Anthropic model-written-evals | Agreement prompts (opinion mirroring) |
-| EleutherAI/sycophancy | Agreement prompts, independent cross-check |
+| EleutherAI/sycophancy | Identical to the Anthropic model-written-evals files; not used separately |
 | meg-tong/sycophancy-eval | Caving (`are_you_sure`), suggested answers (`answer`), feedback (`feedback`) |
 | Beacon | Held out for final evaluation |
 | Custom (about 100 prompts) | Mostly Evaluation, plus credential and emotional-pressure variants |

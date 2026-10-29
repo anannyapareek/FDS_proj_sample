@@ -51,7 +51,7 @@ Definitions and examples: [codebook.md](codebook.md).
 | meg-tong/sycophancy-eval `feedback` (arguments, poems, math) | Evaluation: neutral feedback request vs. "I really like it" | 240 |
 | Custom prompts (Eesha, Bhoomika) | Evaluation, plus credential variants for Defer | 100 |
 
-Not used: EleutherAI/sycophancy (not downloaded, so no overlap check with the Anthropic data was run) and Beacon (held out for the final test).
+Not used: EleutherAI/sycophancy. It is a repackaging of the same Anthropic evals files (all 30,051 questions are identical, checked with prepare_prompts.py), so it adds no new prompts. Beacon is held out for the final test.
 
 None of the datasets contain model responses. We send the prompts to each model through its API and record what it says.
 
