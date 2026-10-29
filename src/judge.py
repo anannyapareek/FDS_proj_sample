@@ -5,7 +5,7 @@ Usage:
     python src/judge.py --responses data/responses_<model>.csv --out data/judged_<model>.csv --mock   # no API, for testing
 
 Settings (in .env, see .env.example):
-    JUDGE_PROVIDER = groq | gemini
+    JUDGE_PROVIDER = groq | gemini | ollama (ollama: JUDGE_MODEL like gpt-oss:20b, runs locally)
     JUDGE_MODEL    = judge model name (check the console for current names)
     GROQ_API_KEY / GEMINI_API_KEY
 
@@ -151,6 +151,19 @@ def call_groq(system, user, model):
     raise RuntimeError("still rate limited after 6 tries")
 
 
+def call_ollama(system, user, model):
+    """Local model through Ollama (runs on this computer's GPU, no key, no daily limit)."""
+    r = requests.post(
+        os.getenv("OLLAMA_URL", "http://localhost:11434") + "/api/chat",
+        json={"model": model, "stream": False, "format": "json",
+              "options": {"temperature": 0, "num_ctx": 8192},
+              "messages": [{"role": "system", "content": system},
+                           {"role": "user", "content": user}]},
+        timeout=600)
+    r.raise_for_status()
+    return r.json()["message"]["content"]
+
+
 def call_gemini(system, user, model):
     r = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
@@ -205,15 +218,19 @@ def main():
     ap.add_argument("--delay", type=float, default=2.0, help="seconds between calls (free-tier limits)")
     ap.add_argument("--limit", type=int, default=None, help="stop after this many new labels (for testing)")
     ap.add_argument("--mock", action="store_true")
+    ap.add_argument("--only-from", default=None,
+                    help="labeled_auto.csv: judge only the rows whose auto_status is needs_judge")
+    ap.add_argument("--shard", default=None,
+                    help="K/N: judge only every N-th row starting at K (1-based), to split work between people, e.g. 2/4")
     a = ap.parse_args()
 
     provider = os.getenv("JUDGE_PROVIDER", "groq")
     model = os.getenv("JUDGE_MODEL", "")
     if not a.mock and not model:
         raise SystemExit("Set JUDGE_MODEL in .env (check the console for a current model name).")
-    if not a.mock and provider not in ("groq", "gemini"):
-        raise SystemExit("JUDGE_PROVIDER must be groq or gemini.")
-    call = call_mock if a.mock else {"groq": call_groq, "gemini": call_gemini}[provider]
+    if not a.mock and provider not in ("groq", "gemini", "ollama"):
+        raise SystemExit("JUDGE_PROVIDER must be groq, gemini or ollama.")
+    call = call_mock if a.mock else {"groq": call_groq, "gemini": call_gemini, "ollama": call_ollama}[provider]
 
     system = SYSTEM.format(codebook=Path(a.codebook).read_text(encoding="utf-8"))
 
@@ -246,6 +263,17 @@ def main():
         pd.DataFrame(columns=cols).to_csv(out, index=False)
 
     todo = [r for r in resp.itertuples() if (r.prompt_id, r.model) not in done]
+    if a.only_from:  # note: neutral answers still come from the full responses file (lookup above)
+        auto = pd.read_csv(a.only_from, dtype=str, keep_default_na=False)
+        # needs_judge, plus no_choice (multiple choice where the response named no letter:
+        # the rules could not decide, the judge reads what it argues)
+        sel = auto.auto_status.isin(["needs_judge", "no_choice"])
+        keep = set(zip(auto.loc[sel, "prompt_id"], auto.loc[sel, "model"]))
+        todo = [r for r in todo if (r.prompt_id, r.model) in keep]
+        print(f"{len(keep)} rows (needs_judge + no_choice) in {a.only_from}")
+    if a.shard:
+        k, n = (int(x) for x in a.shard.split("/"))
+        todo = todo[k - 1::n]
     print(f"{len(todo)} to label, {len(done)} already done")
     n_new = n_skip = 0
     for i, r in enumerate(todo, 1):
@@ -270,7 +298,7 @@ def main():
         pd.DataFrame([row], columns=cols).to_csv(out, mode="a", header=False, index=False)
         n_new += 1
         print(f"[{i}/{len(todo)}] {r.prompt_id} -> {row.get('breed') or row['judge_error']}")
-        if not a.mock:
+        if not a.mock and provider != "ollama":
             time.sleep(a.delay)
     print(f"done: {n_new} labeled, {n_skip} skipped")
     if n_skip:
