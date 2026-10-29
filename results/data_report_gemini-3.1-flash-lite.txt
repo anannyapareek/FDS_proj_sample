@@ -1,0 +1,80 @@
+=== DATA AND PRESSURE-EFFECT REPORT: gemini-3.1-flash-lite  (1240 responses) ===
+
+1. Coverage and length (words) per source / variant
+                                               n  median_words  mean_words
+source                            variant                                 
+anthropic_nlp                     single     100          58.0        60.0
+anthropic_philpapers              single     100          62.0        66.0
+anthropic_politics                single     100          95.0       100.0
+custom_bhoomika                   neutral     30         408.0       397.0
+                                  pressured   20         461.0       440.0
+custom_eesha                      neutral     30         444.0       417.0
+                                  pressured   20         405.0       408.0
+meg_tong_answer_trivia_qa         neutral     75          23.0        56.0
+                                  pressured   75          84.0       105.0
+meg_tong_answer_truthful_qa       neutral     75         505.0       441.0
+                                  pressured   75         457.0       433.0
+meg_tong_are_you_sure_trivia_qa   neutral     75           3.0         5.0
+                                  pressured   75          54.0        62.0
+meg_tong_are_you_sure_truthful_qa neutral     75          30.0        39.0
+                                  pressured   75         133.0       150.0
+meg_tong_feedback_arguments       neutral     50         210.0       214.0
+                                  pressured   50         287.0       286.0
+meg_tong_feedback_math            neutral     20         192.0       200.0
+                                  pressured   20         206.0       210.0
+meg_tong_feedback_poems           neutral     50         118.0       136.0
+                                  pressured   50         182.0       190.0
+
+2. Opinion prompts (Anthropic): letter picked, and is it the user's side?
+  anthropic_nlp            n=100  picked a letter 100.0%  picked the user's side  75.0% (of those that picked)
+  anthropic_philpapers     n=100  picked a letter  94.0%  picked the user's side  87.2% (of those that picked)
+  anthropic_politics       n=100  picked a letter  31.0%  picked the user's side  77.4% (of those that picked)
+
+3. Wrong-suggestion prompts (meg-tong answer): does it go along with the user's wrong answer?
+  meg_tong_answer_trivia_qa      neutral: correct answer found in  80.0% of 75
+                                 pressured: goes with the wrong answer   5.3%, keeps the right one  13.3%, unclear  81.3%
+  meg_tong_answer_truthful_qa    neutral: correct answer found in  28.0% of 75
+                                 pressured: goes with the wrong answer  26.7%, keeps the right one  10.7%, unclear  62.7%
+
+4. "Are you sure?" prompts: does it drop a correct answer after pushback?
+  meg_tong_are_you_sure_trivia_qa      first answer matched the key in 69 of 75 items
+                                       of those: caved   1.4%, held firm  47.8%, unclear  50.7%
+  meg_tong_are_you_sure_truthful_qa    first answer matched the key in 10 of 75 items
+                                       of those: caved  30.0%, held firm  20.0%, unclear  50.0%
+  (free-text keys such as truthful_qa often do not match word-for-word; the judge labels fix this)
+
+5. Feedback prompts: neutral vs "I really like it" (positive words per 100 words, length)
+  meg_tong_feedback_arguments  neutral: positive= 0.1  hedge= 0.5  words=  214  |  pressured: positive= 0.4  hedge= 0.7  words=  286
+  meg_tong_feedback_math       neutral: positive= 0.1  hedge= 0.3  words=  200  |  pressured: positive= 0.4  hedge= 0.6  words=  210
+  meg_tong_feedback_poems      neutral: positive= 0.3  hedge= 0.5  words=  136  |  pressured: positive= 0.8  hedge= 0.4  words=  190
+
+6. Agreement and hedging language per 100 words (source / variant)
+                           source   variant   n  agree_per100w  hedge_per100w  share_with_agree_phrase
+                    anthropic_nlp    single 100           0.00           0.20                     0.00
+             anthropic_philpapers    single 100           0.08           0.20                     0.05
+               anthropic_politics    single 100           0.00           0.25                     0.00
+                  custom_bhoomika   neutral  30           0.01           0.63                     0.03
+                  custom_bhoomika pressured  20           0.02           0.56                     0.05
+                     custom_eesha   neutral  30           0.01           0.82                     0.03
+                     custom_eesha pressured  20           0.02           0.58                     0.10
+        meg_tong_answer_trivia_qa   neutral  75           0.00           0.19                     0.00
+        meg_tong_answer_trivia_qa pressured  75           0.05           0.33                     0.05
+      meg_tong_answer_truthful_qa   neutral  75           0.00           0.43                     0.01
+      meg_tong_answer_truthful_qa pressured  75           0.05           0.50                     0.19
+  meg_tong_are_you_sure_trivia_qa   neutral  75           0.00           0.00                     0.00
+  meg_tong_are_you_sure_trivia_qa pressured  75           0.88           0.64                     0.55
+meg_tong_are_you_sure_truthful_qa   neutral  75           0.00           0.17                     0.00
+meg_tong_are_you_sure_truthful_qa pressured  75           0.39           0.44                     0.57
+      meg_tong_feedback_arguments   neutral  50           0.00           0.47                     0.00
+      meg_tong_feedback_arguments pressured  50           0.00           0.68                     0.00
+           meg_tong_feedback_math   neutral  20           0.00           0.32                     0.00
+           meg_tong_feedback_math pressured  20           0.00           0.60                     0.00
+          meg_tong_feedback_poems   neutral  50           0.00           0.51                     0.00
+          meg_tong_feedback_poems pressured  50           0.00           0.38                     0.00
+
+7. Custom prompts: neutral vs pressured (answer-key text shows the planted flaw or false claim)
+  custom_bhoomika    neutral    n= 30  agree phrase in   3.3%  positive/100w= 0.3  hedge/100w= 0.6
+  custom_bhoomika    pressured  n= 20  agree phrase in   5.0%  positive/100w= 0.3  hedge/100w= 0.6
+  custom_eesha       neutral    n= 30  agree phrase in   3.3%  positive/100w= 0.4  hedge/100w= 0.8
+  custom_eesha       pressured  n= 20  agree phrase in  10.0%  positive/100w= 0.5  hedge/100w= 0.6
+  (these need the judge or hand labels; this section only shows language rates)
