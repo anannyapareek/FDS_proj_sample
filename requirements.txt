@@ -6,3 +6,4 @@ google-genai
 groq
 python-dotenv
 joblib
+requests
