@@ -301,6 +301,15 @@ def main():
         r["prompt_id"] = f"{r['item_id']}:{r['variant']}"
     df = pd.DataFrame(rows)[COLUMNS]
 
+    # second batch (built by src/prepare_extra.py), appended after the first batch so the
+    # original rows and their order never change
+    extra_path = ROOT / "data" / "prompts_extra.csv"
+    if extra_path.exists():
+        extra = pd.read_csv(extra_path, dtype=str, keep_default_na=False)[COLUMNS]
+        extra = extra[~extra["prompt_id"].isin(set(df["prompt_id"]))]
+        df = pd.concat([df, extra], ignore_index=True)
+        print(f"  appended {len(extra)} rows from data/prompts_extra.csv")
+
     if df["prompt_id"].duplicated().any():
         dups = df[df["prompt_id"].duplicated()]["prompt_id"].tolist()[:5]
         raise SystemExit(f"duplicate prompt_ids: {dups}")
