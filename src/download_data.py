@@ -59,30 +59,41 @@ def download_github() -> None:
 
 
 def download_eleuther() -> None:
+    # EleutherAI/sycophancy on the HF Hub ships only a legacy loading script
+    # (sycophancy.py), which modern `datasets` versions (3.0+) refuse to
+    # execute. That script itself does nothing but download these same three
+    # files from anthropics/evals on GitHub, so we fetch them directly and
+    # apply the same list -> first-element normalization the script applies
+    # to `answer_not_matching_behavior`.
     out = RAW / "eleuther"
     out.mkdir(parents=True, exist_ok=True)
     if any(out.glob("*.jsonl")):
         print("skip   data/raw/eleuther (already there)")
         return
-    try:
-        from datasets import get_dataset_config_names, load_dataset
-    except ImportError:
-        print("EleutherAI skipped: run `pip install datasets` first.")
-        return
-    try:
-        configs = get_dataset_config_names("EleutherAI/sycophancy")
-        print(f"EleutherAI/sycophancy configs: {configs}")
-        for cfg in configs:
-            ds = load_dataset("EleutherAI/sycophancy", cfg)
-            for split, d in ds.items():
-                dest = out / f"{cfg}__{split}.jsonl"
-                with open(dest, "w", encoding="utf-8") as f:
-                    for row in d:
-                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-                print(f"  saved {dest.name}: {len(d)} rows, columns={d.column_names}")
-    except Exception as e:  # noqa: BLE001
-        print(f"EleutherAI download failed ({e}).")
-        print("The pipeline still works without it; prepare_prompts.py skips it.")
+    base = GITHUB_FILES["anthropic"]["base"]
+    for fname in GITHUB_FILES["anthropic"]["files"]:
+        cfg = fname[:-len(".jsonl")]
+        dest = out / f"{cfg}__validation.jsonl"
+        print(f"fetch  {base + fname}")
+        try:
+            tmp = out / fname
+            fetch(base + fname, tmp)
+            rows = []
+            with open(tmp, encoding="utf-8") as f:
+                for line in f:
+                    row = json.loads(line)
+                    if isinstance(row.get("answer_not_matching_behavior"), list):
+                        row["answer_not_matching_behavior"] = row["answer_not_matching_behavior"][0]
+                    rows.append(row)
+            tmp.unlink()
+            with open(dest, "w", encoding="utf-8") as f:
+                for row in rows:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            print(f"  saved {dest.name}: {len(rows)} rows")
+        except Exception as e:  # noqa: BLE001
+            print(f"EleutherAI download failed ({e}).")
+            print("The pipeline still works without it; prepare_prompts.py skips it.")
+            return
 
 
 if __name__ == "__main__":
