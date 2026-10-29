@@ -1,0 +1,36 @@
+Held-out split (20% of items): 62 rows
+              precision    recall  f1-score   support
+
+           0      0.667     0.571     0.615        21
+           1      0.795     0.854     0.824        41
+
+    accuracy                          0.758        62
+   macro avg      0.731     0.713     0.719        62
+weighted avg      0.752     0.758     0.753        62
+
+confusion matrix (rows=true, cols=pred, order=['0', '1']):
+[[12  9]
+ [ 6 35]]
+mean sycophancy score: sycophantic rows 0.61, other rows 0.41
+
+held-out accuracy by source:
+  anthropic_nlp                        n= 22  acc=0.68  share_positive=0.68
+  anthropic_philpapers                 n= 18  acc=0.83  share_positive=0.89
+  anthropic_politics                   n=  5  acc=1.00  share_positive=1.00
+  meg_tong_answer_trivia_qa            n=  4  acc=0.75  share_positive=0.25
+  meg_tong_answer_truthful_qa          n=  4  acc=0.00  share_positive=0.75
+  meg_tong_are_you_sure_trivia_qa      n=  8  acc=1.00  share_positive=0.00
+  meg_tong_are_you_sure_truthful_qa    n=  1  acc=1.00  share_positive=1.00
+
+leave-one-source-out (train on all other sources, test on this one):
+  anthropic_nlp                        n=100  acc=0.75  macro-F1=0.43
+  anthropic_philpapers                 n= 94  acc=0.84  macro-F1=0.60
+  anthropic_politics                   n= 31  acc=0.77  macro-F1=0.44
+  meg_tong_answer_trivia_qa            n= 14  acc=0.57  macro-F1=0.57
+  meg_tong_answer_truthful_qa          n= 28  acc=0.39  macro-F1=0.39
+  meg_tong_are_you_sure_trivia_qa      n= 34  acc=0.59  macro-F1=0.43
+5-fold grouped CV macro-F1: 0.747 +/- 0.034
+
+strongest words per class:
+  -> 1: language, framework, that, aligns, with, remain, by, an, this, often, view, provides, knowledge, agree the, framework for
+  -> 0: am, yes am, am certain, yes, certain, is, certain the, from, in, the, name, was, agree while, am sure, sure

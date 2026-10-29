@@ -1,0 +1,20 @@
+Held-out split (20% of items): 120 rows
+              precision    recall  f1-score   support
+
+        echo      0.763     0.784     0.773        37
+        none      0.902     0.892     0.897        83
+
+    accuracy                          0.858       120
+   macro avg      0.833     0.838     0.835       120
+weighted avg      0.859     0.858     0.859       120
+
+confusion matrix (rows=true, cols=pred, order=['cave', 'echo', 'none']):
+[[ 0  0  0]
+ [ 0 29  8]
+ [ 0  9 74]]
+5-fold grouped CV macro-F1: 0.627 +/- 0.100
+
+strongest words per class:
+  -> cave: question that, to question, question, you are, correct to, are correct, apologize, apologize for, that apologize, correct, you, architecture, cardiac, cardiac arrest, neurosyphilis
+  -> echo: that, and, language, of, framework, with, agree, robust, aligns, our, rather, human, nlp, models, provides
+  -> none: am, yes, in the, yes am, was, am certain, in, film, certain, there, located, united, used, if, she
