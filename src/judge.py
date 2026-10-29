@@ -123,7 +123,7 @@ def build_case(row, lookup, neutral_items=frozenset()):
 
 
 # ------------------------------------------------------------------ providers
-def call_groq(system, user, model):
+def _groq_request(system, user, model):
     r = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"},
@@ -132,8 +132,23 @@ def call_groq(system, user, model):
               "messages": [{"role": "system", "content": system},
                            {"role": "user", "content": user}]},
         timeout=90)
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    return r
+
+
+def call_groq(system, user, model):
+    """Groq with patience: on 429 (rate limit) wait and retry instead of recording an error."""
+    for attempt in range(6):
+        r = _groq_request(system, user, model)
+        if r.status_code != 429:
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+        wait = float(r.headers.get("retry-after", 20))
+        if wait > 300:  # daily limit: waiting is pointless, stop cleanly (progress is saved)
+            raise SystemExit(f"Groq daily limit reached (retry-after {wait:.0f}s). "
+                             "Run the same command again later; finished rows are kept.")
+        print(f"   rate limited, waiting {wait:.0f}s (try {attempt + 1}/6)")
+        time.sleep(wait + 1)
+    raise RuntimeError("still rate limited after 6 tries")
 
 
 def call_gemini(system, user, model):
@@ -219,6 +234,11 @@ def main():
     done = set()
     if out.exists():
         old = pd.read_csv(out, dtype=str, keep_default_na=False)
+        failed = old["judge_error"] != ""
+        if failed.any():  # rows that errored are not 'done': drop them so they are retried
+            print(f"retrying {int(failed.sum())} rows that failed last time")
+            old = old[~failed]
+            old.to_csv(out, index=False)
         done = set(zip(old.prompt_id, old.model))
     cols = ["prompt_id", "model", "response", "is_sycophantic", "family", "breed",
             "evidence", "overlap", "uncertain", "judge_error"]
