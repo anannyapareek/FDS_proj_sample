@@ -1,8 +1,8 @@
-"""Send prompts.csv to one model and save its responses. Works for Gemini and Groq.
+"""Send prompts.csv to one model and save its responses. Works for Ollama (and Gemini).
 
 Examples (run from the repo root):
     python src/collect.py --provider gemini --model <gemini-model-name> --rpm 10
-    python src/collect.py --provider groq   --model <groq-model-name>   --rpm 25
+    python src/collect.py --provider ollama --model llama3.1:8b --rpm 0    # OLLAMA_URL in .env
     python src/collect.py --provider mock   --model mock-a --limit 20      # no key needed
 
 Output: data/responses_<model>.csv with columns prompt_id, model, response.
@@ -13,8 +13,8 @@ Rows with a `followup` (are-you-sure pressure) are sent as 3 turns:
     user: prompt  ->  assistant: THIS model's own neutral answer  ->  user: followup
 so the neutral row for the same item must be collected first (the file order guarantees it).
 
-Keys come from .env (GEMINI_API_KEY, GROQ_API_KEY). Model names change often:
-check the model list in your console and pass the name with --model.
+Settings come from .env: OLLAMA_URL (default http://localhost:11434), GEMINI_API_KEY.
+Pass the exact model name with --model (for Ollama, the tag shown by `ollama list`).
 """
 import argparse
 import csv
@@ -31,8 +31,9 @@ FIELDS = ["prompt_id", "model", "response"]
 
 
 # ----------------------------------------------------------------- providers
-def make_caller(provider: str, model: str):
-    """Return fn(messages) -> str. messages = [{'role': 'user'|'assistant', 'content': str}]."""
+def make_caller(provider: str, model: str, max_tokens=None, usage=None):
+    """Return fn(messages) -> str. messages = [{'role': 'user'|'assistant', 'content': str}].
+    Ollama: max_tokens caps the reply length; if usage is a dict, the last call's token counts go in it."""
     if provider == "mock":
         def call(messages):
             last = messages[-1]["content"]
@@ -66,16 +67,23 @@ def make_caller(provider: str, model: str):
 
         return call
 
-    if provider == "groq":
-        key = os.getenv("GROQ_API_KEY")
-        if not key:
-            sys.exit("GROQ_API_KEY missing. Put it in .env (see .env.example).")
-        from groq import Groq
-        client = Groq(api_key=key)
+    if provider == "ollama":
+        import requests
+        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/") + "/api/chat"
+        key = os.getenv("OLLAMA_API_KEY")  # only needed for Ollama Cloud (https://ollama.com)
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        options = {"num_ctx": 8192, **({"num_predict": max_tokens} if max_tokens else {})}
 
         def call(messages):
-            r = client.chat.completions.create(model=model, messages=messages)
-            text = r.choices[0].message.content
+            r = requests.post(url, headers=headers, timeout=600,
+                              json={"model": model, "messages": messages, "stream": False, "options": options})
+            if r.status_code >= 400:
+                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+            j = r.json()
+            if usage is not None:
+                p, c = j.get("prompt_eval_count", 0), j.get("eval_count", 0)
+                usage.update(prompt_tokens=p, completion_tokens=c, total_tokens=p + c)
+            text = j.get("message", {}).get("content", "")
             if not text:
                 raise RuntimeError("empty response")
             return text
@@ -102,13 +110,16 @@ def with_retries(call, messages, tries=5):
 # ---------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--provider", required=True, choices=["gemini", "groq", "mock"])
+    ap.add_argument("--provider", required=True, choices=["ollama", "gemini", "mock"])
     ap.add_argument("--model", required=True, help="exact model name from your console")
     ap.add_argument("--prompts", default=str(ROOT / "data" / "prompts.csv"))
     ap.add_argument("--out", default=None, help="default: data/responses_<model>.csv")
     ap.add_argument("--rpm", type=float, default=10, help="max requests per minute (stay under your limit)")
     ap.add_argument("--limit", type=int, default=None, help="stop after this many NEW calls (for testing)")
     ap.add_argument("--sources", default=None, help="comma-separated source names to include")
+    ap.add_argument("--max-tokens", type=int, default=None, help="cap reply length (ollama; default: model's own)")
+    ap.add_argument("--usage-log", default=None,
+                    help="ollama: append prompt_id and token counts per call to this CSV")
     args = ap.parse_args()
 
     df = pd.read_csv(args.prompts, dtype=str, keep_default_na=False)
@@ -128,7 +139,8 @@ def main():
         done = dict(zip(prev.prompt_id, prev.response))
     print(f"{len(df)} prompts selected, {len(done)} already saved in {out.name}")
 
-    call = make_caller(args.provider, args.model)
+    usage = {} if args.usage_log else None
+    call = make_caller(args.provider, args.model, args.max_tokens, usage)
     gap = 60.0 / args.rpm if args.rpm > 0 else 0
     new_file = not out.exists() or out.stat().st_size == 0
     n_new = n_fail = n_skip = 0
@@ -166,6 +178,15 @@ def main():
             f.flush()
             done[row.prompt_id] = text
             n_new += 1
+            if usage:
+                ulog = Path(args.usage_log)
+                first = not ulog.exists()
+                with open(ulog, "a", newline="", encoding="utf-8") as uf:
+                    uw = csv.writer(uf)
+                    if first:
+                        uw.writerow(["prompt_id", "prompt_tokens", "completion_tokens", "total_tokens"])
+                    uw.writerow([row.prompt_id, usage["prompt_tokens"], usage["completion_tokens"],
+                                 usage["total_tokens"]])
             if n_new % 25 == 0:
                 print(f"  {n_new} new this run, {len(done)} total")
             time.sleep(max(0.0, gap - (time.time() - t0)))

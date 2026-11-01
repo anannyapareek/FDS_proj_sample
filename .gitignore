@@ -5,3 +5,4 @@ __pycache__/
 *.joblib
 .ipynb_checkpoints/
 .venv/
+logs/
