@@ -1,7 +1,8 @@
-"""Send prompts.csv to one model and save its responses. Works for Ollama (and Gemini).
+"""Send prompts.csv to one model and save its responses. Works for Ollama, Groq and Gemini.
 
 Examples (run from the repo root):
     python src/collect.py --provider gemini --model <gemini-model-name> --rpm 10
+    python src/collect.py --provider groq   --model <groq-model-name>   --rpm 25
     python src/collect.py --provider ollama --model llama3.1:8b --rpm 0    # OLLAMA_URL in .env
     python src/collect.py --provider mock   --model mock-a --limit 20      # no key needed
 
@@ -13,8 +14,8 @@ Rows with a `followup` (are-you-sure pressure) are sent as 3 turns:
     user: prompt  ->  assistant: THIS model's own neutral answer  ->  user: followup
 so the neutral row for the same item must be collected first (the file order guarantees it).
 
-Settings come from .env: OLLAMA_URL (default http://localhost:11434), GEMINI_API_KEY.
-Pass the exact model name with --model (for Ollama, the tag shown by `ollama list`).
+Settings come from .env: OLLAMA_URL (default http://localhost:11434), GROQ_API_KEY, GEMINI_API_KEY.
+Pass the exact model name with --model (Ollama: the tag shown by `ollama list`; Groq/Gemini: check the console).
 """
 import argparse
 import csv
@@ -31,9 +32,13 @@ FIELDS = ["prompt_id", "model", "response"]
 
 
 # ----------------------------------------------------------------- providers
+class DailyLimit(Exception):
+    """The provider's per-day quota is used up: stop the run, resume tomorrow."""
+
+
 def make_caller(provider: str, model: str, max_tokens=None, usage=None):
     """Return fn(messages) -> str. messages = [{'role': 'user'|'assistant', 'content': str}].
-    Ollama: max_tokens caps the reply length; if usage is a dict, the last call's token counts go in it."""
+    Groq/Ollama: max_tokens caps the reply length; if usage is a dict, the last call's token counts go in it."""
     if provider == "mock":
         def call(messages):
             last = messages[-1]["content"]
@@ -67,9 +72,29 @@ def make_caller(provider: str, model: str, max_tokens=None, usage=None):
 
         return call
 
+    if provider == "groq":
+        key = os.getenv("GROQ_API_KEY")
+        if not key:
+            sys.exit("GROQ_API_KEY missing. Put it in .env (see .env.example).")
+        from groq import Groq
+        client = Groq(api_key=key)
+
+        def call(messages):
+            extra = {"max_tokens": max_tokens} if max_tokens else {}
+            r = client.chat.completions.create(model=model, messages=messages, **extra)
+            if usage is not None and r.usage is not None:
+                usage.update(prompt_tokens=r.usage.prompt_tokens, completion_tokens=r.usage.completion_tokens,
+                             total_tokens=r.usage.total_tokens)
+            text = r.choices[0].message.content
+            if not text:
+                raise RuntimeError("empty response")
+            return text
+
+        return call
+
     if provider == "ollama":
         import requests
-        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/") + "/api/chat"
+        url = (os.getenv("OLLAMA_URL") or "http://localhost:11434").rstrip("/") + "/api/chat"
         key = os.getenv("OLLAMA_API_KEY")  # only needed for Ollama Cloud (https://ollama.com)
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         options = {"num_ctx": 8192, **({"num_predict": max_tokens} if max_tokens else {})}
@@ -100,6 +125,9 @@ def with_retries(call, messages, tries=5):
         try:
             return call(messages)
         except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            if "per day" in msg or "(rpd)" in msg or "(tpd)" in msg:
+                raise DailyLimit(str(e)[:300]) from e
             if attempt == tries:
                 raise
             print(f"    attempt {attempt}/{tries} failed ({str(e)[:120]}); waiting {wait}s")
@@ -110,16 +138,16 @@ def with_retries(call, messages, tries=5):
 # ---------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--provider", required=True, choices=["ollama", "gemini", "mock"])
+    ap.add_argument("--provider", required=True, choices=["ollama", "groq", "gemini", "mock"])
     ap.add_argument("--model", required=True, help="exact model name from your console")
     ap.add_argument("--prompts", default=str(ROOT / "data" / "prompts.csv"))
     ap.add_argument("--out", default=None, help="default: data/responses_<model>.csv")
     ap.add_argument("--rpm", type=float, default=10, help="max requests per minute (stay under your limit)")
     ap.add_argument("--limit", type=int, default=None, help="stop after this many NEW calls (for testing)")
     ap.add_argument("--sources", default=None, help="comma-separated source names to include")
-    ap.add_argument("--max-tokens", type=int, default=None, help="cap reply length (ollama; default: model's own)")
+    ap.add_argument("--max-tokens", type=int, default=None, help="cap reply length (groq/ollama; default: model's own)")
     ap.add_argument("--usage-log", default=None,
-                    help="ollama: append prompt_id and token counts per call to this CSV")
+                    help="groq/ollama: append prompt_id and token counts per call to this CSV")
     args = ap.parse_args()
 
     df = pd.read_csv(args.prompts, dtype=str, keep_default_na=False)
@@ -169,6 +197,10 @@ def main():
             t0 = time.time()
             try:
                 text = with_retries(call, messages).strip()
+            except DailyLimit as e:
+                print(f"  DAILY LIMIT reached at {row.prompt_id}: {e}")
+                print("  Stopping. Run the same command again later to resume.")
+                break
             except Exception as e:  # noqa: BLE001
                 print(f"  FAILED {row.prompt_id}: {str(e)[:150]}")
                 n_fail += 1
