@@ -4,6 +4,7 @@ Examples (run from the repo root):
     python src/collect.py --provider gemini --model <gemini-model-name> --rpm 10
     python src/collect.py --provider groq   --model <groq-model-name>   --rpm 25
     python src/collect.py --provider ollama --model llama3.1:8b --rpm 0    # OLLAMA_URL in .env
+    python src/collect.py --provider ollama --model qwen3.8:27b --rpm 0 --think on   # thinking model
     python src/collect.py --provider mock   --model mock-a --limit 20      # no key needed
 
 Output: data/responses_<model>.csv with columns prompt_id, model, response.
@@ -16,6 +17,9 @@ so the neutral row for the same item must be collected first (the file order gua
 
 Settings come from .env: OLLAMA_URL (default http://localhost:11434), GROQ_API_KEY, GEMINI_API_KEY.
 Pass the exact model name with --model (Ollama: the tag shown by `ollama list`; Groq/Gemini: check the console).
+
+Thinking models on Ollama (--think on): the model reasons first, but only the final answer
+(message.content) is saved. The reasoning text is never written to the responses file.
 """
 import argparse
 import csv
@@ -36,9 +40,10 @@ class DailyLimit(Exception):
     """The provider's per-day quota is used up: stop the run, resume tomorrow."""
 
 
-def make_caller(provider: str, model: str, max_tokens=None, usage=None):
+def make_caller(provider: str, model: str, max_tokens=None, usage=None, think=None, num_ctx=8192):
     """Return fn(messages) -> str. messages = [{'role': 'user'|'assistant', 'content': str}].
-    Groq/Ollama: max_tokens caps the reply length; if usage is a dict, the last call's token counts go in it."""
+    Groq/Ollama: max_tokens caps the reply length; if usage is a dict, the last call's token counts go in it.
+    Ollama: think='on'/'off' turns a thinking model's reasoning on or off (None = model default)."""
     if provider == "mock":
         def call(messages):
             last = messages[-1]["content"]
@@ -97,20 +102,26 @@ def make_caller(provider: str, model: str, max_tokens=None, usage=None):
         url = (os.getenv("OLLAMA_URL") or "http://localhost:11434").rstrip("/") + "/api/chat"
         key = os.getenv("OLLAMA_API_KEY")  # only needed for Ollama Cloud (https://ollama.com)
         headers = {"Authorization": f"Bearer {key}"} if key else {}
-        options = {"num_ctx": 8192, **({"num_predict": max_tokens} if max_tokens else {})}
+        options = {"num_ctx": num_ctx, **({"num_predict": max_tokens} if max_tokens else {})}
+        body = {"model": model, "stream": False, "options": options}
+        if think is not None:
+            body["think"] = think == "on"
 
         def call(messages):
-            r = requests.post(url, headers=headers, timeout=600,
-                              json={"model": model, "messages": messages, "stream": False, "options": options})
+            # long timeout: a thinking model can reason for several minutes before answering
+            r = requests.post(url, headers=headers, timeout=1800, json={**body, "messages": messages})
             if r.status_code >= 400:
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
             j = r.json()
             if usage is not None:
                 p, c = j.get("prompt_eval_count", 0), j.get("eval_count", 0)
                 usage.update(prompt_tokens=p, completion_tokens=c, total_tokens=p + c)
+            # only the final answer is kept; the reasoning (message.thinking) is not saved
             text = j.get("message", {}).get("content", "")
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
             if not text:
-                raise RuntimeError("empty response")
+                why = " (ran out of context while thinking; try a larger --num-ctx)" if j.get("done_reason") == "length" else ""
+                raise RuntimeError("empty response" + why)
             return text
 
         return call
@@ -148,6 +159,11 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=None, help="cap reply length (groq/ollama; default: model's own)")
     ap.add_argument("--usage-log", default=None,
                     help="groq/ollama: append prompt_id and token counts per call to this CSV")
+    ap.add_argument("--think", choices=["on", "off"], default=None,
+                    help="ollama: turn a thinking model's reasoning on or off (default: model's own setting). "
+                         "Only the final answer is saved either way.")
+    ap.add_argument("--num-ctx", type=int, default=8192,
+                    help="ollama: context window in tokens (raise it if long thinking runs out of room)")
     args = ap.parse_args()
 
     df = pd.read_csv(args.prompts, dtype=str, keep_default_na=False)
@@ -168,7 +184,7 @@ def main():
     print(f"{len(df)} prompts selected, {len(done)} already saved in {out.name}")
 
     usage = {} if args.usage_log else None
-    call = make_caller(args.provider, args.model, args.max_tokens, usage)
+    call = make_caller(args.provider, args.model, args.max_tokens, usage, args.think, args.num_ctx)
     gap = 60.0 / args.rpm if args.rpm > 0 else 0
     new_file = not out.exists() or out.stat().st_size == 0
     n_new = n_fail = n_skip = 0
